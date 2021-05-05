@@ -17,6 +17,7 @@ Internal GitHub Action for VertigoStudio products to send release notes to store
 `AUTH_TOKEN`        - Store Authorization token
 `STORE_URL`         - Store URL
 `BUILD_VERSION`     - Product new version
+`GITHUB_TOKEN`      - Github Authorization token
 
 
 ## Example usage
