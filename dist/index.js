@@ -23072,7 +23072,7 @@ Toolkit.run(async tools => {
 
         storeUrl = new URL(storeUrl);
         tools.log.debug('Starting commit verification!');
-        let commitMessage = tools.context.payload.commits[0].commit.message || '';
+        let commitMessage = tools.context.payload.commits[0].message || '';
         if(ignoreNotes){
             commitMessage = '';
         }
