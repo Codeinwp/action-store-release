@@ -1,6 +1,23 @@
 # Action to send release notes to store
 Internal GitHub Action for VertigoStudio products to send release notes to store
 
+## Inputs
+
+### `strip_first_lines`
+
+**Required** Strip first X lines from commit message. Default `4`.
+
+### `no_notes`
+
+**Required** Avoid sending notes from the commit message. Default `false`.
+
+## Example usage
+
+uses: Codeinwp/action-store-release@main
+with:
+strip_first_lines: '4'
+
+
 
 ##Contributing
 

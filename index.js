@@ -25,13 +25,13 @@ Toolkit.run(async tools => {
         if(ignoreNotes){
             commitMessage = '';
         }
-        if (commitMessage.length === 0) {
+        if (commitMessage.length !== 0) {
             tools.log.debug('No commit found!');
+            commitMessage = commitMessage.split(/\r?\n/);
+            commitMessage.splice(0, stripedLines);
+            commitMessage = commitMessage.join("\n");
+            commitMessage = converter.makeHtml(commitMessage);
         }
-        commitMessage = commitMessage.split(/\r?\n/);
-        commitMessage.splice(0, stripedLines);
-        commitMessage = commitMessage.join("\n");
-        commitMessage = converter.makeHtml(commitMessage);
         const data = JSON.stringify({
             "version": buildVersion, "id": productId, "body": commitMessage, no_parsing: "yes"
         });
