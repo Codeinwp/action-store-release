@@ -1,0 +1,14 @@
+name: 'Hello World'
+description: 'Greet someone and record the time'
+inputs:
+  strip_first_lines:  # id of input
+    description: 'How many lines should strip from notes'
+    required: false
+    default: '4'
+  no_notes:  # id of input
+    description: 'Should we parse the commit message?'
+    required: false
+    default: 'false'
+runs:
+  using: 'node12'
+  main: 'dist/index.js'

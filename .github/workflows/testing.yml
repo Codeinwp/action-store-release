@@ -1,7 +1,7 @@
 on: [ push ]
 
 jobs:
-  pr_announcer:
+  testing:
     runs-on: ubuntu-latest
     name: Sample job
     steps:
@@ -9,13 +9,9 @@ jobs:
         uses: actions/checkout@v2
         if: ${{ env.ACT }}
         with:
-          path: "action-pr-merged-announcer"
-      - name: Checking merged commit
+          path: "action-store-release"
+      - name: Testing
         uses: ./
         if: ${{ env.ACT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ secrets.GITHUB_REPOSITORY }}
-        with:
-          destination_repo: "Codeinwp/docs"
-          issue_labels: "neve"
