@@ -11,6 +11,14 @@ Internal GitHub Action for VertigoStudio products to send release notes to store
 
 **Required** Avoid sending notes from the commit message. Default `false`.
 
+## Required Environment Variables
+
+`PRODUCT_ID`        - Product Store id
+`AUTH_TOKEN`        - Store Authorization token
+`STORE_URL`         - Store URL
+`BUILD_VERSION`     - Product new version
+
+
 ## Example usage
 
 uses: Codeinwp/action-store-release@main

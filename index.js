@@ -14,8 +14,8 @@ Toolkit.run(async tools => {
         }
         const stripedLines = parseInt(core.getInput('strip_first_lines'));
         const ignoreNotes = core.getInput('no_notes') === 'true';
-        const productId = process.env.THEMEISLE_ID || '';
-        const token = process.env.THEMEISLE_STORE_AUTH || '';
+        const productId = process.env.PRODUCT_ID || '';
+        const token = process.env.AUTH_TOKEN || '';
         let storeUrl = process.env.STORE_URL || '';
         const buildVersion = process.env.BUILD_VERSION || '';
 
