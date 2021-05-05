@@ -19,15 +19,15 @@ strip_first_lines: '4'
 
 
 
-##Contributing
+## Contributing
 
-####Requirements
+#### Requirements
 * [act](https://github.com/nektos/act) local runner
 * [GH](https://github.com/cli/cli) cli
 * [@vercel/ncc](https://github.com/vercel/ncc) as globaly installed package ( `npm i -g @vercel/ncc` )
 
 
-####How to test
+#### How to test
 `act push -j testing ` will run the action using act
 
 For building the dist file, you can use `ncc build index.js --license licenses.txt` or `ncc build index.js --license licenses.txt -w` for watch mode
