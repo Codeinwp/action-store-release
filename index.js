@@ -5,7 +5,18 @@ const showdown = require('showdown'),
     converter = new showdown.Converter({simplifiedAutoLink: true});
 const https = require('https');
 const url = require('url');
-
+function escapeForJson(str) {
+    return str
+        .replace(/\\/g, '\\\\')  // Escape backslashes
+        .replace(/"/g, '\\"')    // Escape straight double quotes
+        .replace(/'/g, "\\'")    // Escape straight single quotes
+        .replace(/“/g, '\\"')    // Escape left double quotation mark
+        .replace(/”/g, '\\"')    // Escape right double quotation mark
+        .replace(/‘/g, "\\'")    // Escape left single quotation mark
+        .replace(/’/g, "\\'")    // Escape right single quotation mark
+        .replace(/\n/g, '\\n')   // Escape newlines
+        .replace(/\r/g, '\\r');  // Escape carriage returns
+}
 Toolkit.run(async tools => {
     try {
         if (!tools.context.payload.ref) {
@@ -33,7 +44,7 @@ Toolkit.run(async tools => {
             commitMessage = converter.makeHtml(commitMessage);
         }
         const data = JSON.stringify({
-            "version": buildVersion, "id": productId, "body": commitMessage, no_parsing: "yes"
+            "version": buildVersion, "id": productId, "body": escapeForJson(commitMessage), no_parsing: "yes"
         });
         const options = {
             hostname: storeUrl.hostname,
