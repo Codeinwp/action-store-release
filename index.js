@@ -14,7 +14,6 @@ function escapeForJson(str) {
         .replace(/”/g, '\\"')    // Escape right double quotation mark
         .replace(/‘/g, "\\'")    // Escape left single quotation mark
         .replace(/’/g, "\\'")    // Escape right single quotation mark
-        .replace(/\n/g, '\\n')   // Escape newlines
         .replace(/\r/g, '\\r');  // Escape carriage returns
 }
 Toolkit.run(async tools => {
