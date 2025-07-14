@@ -40,7 +40,6 @@ Toolkit.run(async tools => {
             commitMessage = commitMessage.split(/\r?\n/);
             commitMessage.splice(0, stripedLines);
             commitMessage = commitMessage.join("\n");
-            commitMessage = converter.makeHtml(commitMessage);
         }
         const data = JSON.stringify({
             "version": buildVersion, "id": productId, "body": escapeForJson(commitMessage), no_parsing: "yes"
