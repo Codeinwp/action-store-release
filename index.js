@@ -50,31 +50,49 @@ Toolkit.run(async tools => {
             headers: {
                 'Cache-Control': 'no-cache',
 
-                'Content-Length': data.length,
+                'Content-Length': Buffer.byteLength(data),
                 'Content-Type': 'application/json',
                 'x-themeisle-auth': token
             },
 
             method: 'POST',
         };
-        const req = https.request(options, (res) => {
-            let data = '';
-            tools.log.debug('Status Code:', res.statusCode);
-            res.on('data', (chunk) => {
-                data += chunk;
+        const receipt = await new Promise((resolve, reject) => {
+            const req = https.request(options, (res) => {
+                let body = '';
+                tools.log.debug('Status Code:', res.statusCode);
+                res.on('data', (chunk) => {
+                    body += chunk;
+                });
+                res.on('end', () => {
+                    if (res.statusCode < 200 || res.statusCode >= 300) {
+                        reject(new Error('Store rejected the release: HTTP ' + res.statusCode + ' ' + body.slice(0, 500)));
+                        return;
+                    }
+                    let parsed;
+                    try {
+                        parsed = JSON.parse(body);
+                    } catch (parseErr) {
+                        reject(new Error('Store returned a malformed receipt: ' + body.slice(0, 500)));
+                        return;
+                    }
+                    if (!parsed || parsed.success !== true) {
+                        reject(new Error('Store did not accept the release: ' + body.slice(0, 500)));
+                        return;
+                    }
+                    resolve(parsed);
+                });
             });
-            res.on('end', () => {
-                tools.log.debug('Body: ', JSON.parse(data));
+            req.setTimeout(30000, () => {
+                req.destroy(new Error('Store request timed out after 30 seconds'));
             });
-
-        }).on("error", (err) => {
-            tools.log.debug("Error: ", err.message);
+            req.on('error', reject);
+            req.write(data);
+            req.end();
         });
-
-        req.write(data);
-        req.end();
+        tools.log.info('Store receipt: ', receipt.data || receipt);
     } catch (err) {
-        const errorMessage = "Error verifying commit."
+        const errorMessage = "Failed to publish the release to the store."
         tools.log.error(errorMessage)
         tools.log.error(err)
 
