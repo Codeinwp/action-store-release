@@ -51,6 +51,11 @@ on:
         description: 'Uploaded artifact containing <product>.zip and <product>.json'
         required: true
         type: string
+      notes:
+        description: 'Customer-facing release notes (HTML), stored verbatim in the release record'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   publish:
@@ -71,6 +76,7 @@ jobs:
       SOURCE_RUN_ID: ${{ github.run_id }}
       SOURCE_TAG: ${{ github.ref_name }}
       SOURCE_COMMIT: ${{ github.sha }}
+      RELEASE_NOTES: ${{ inputs.notes }}
     steps:
       - name: Validate inputs
         run: |
@@ -143,7 +149,9 @@ jobs:
             --arg run_id "$SOURCE_RUN_ID" \
             --arg tag "$SOURCE_TAG" \
             --arg commit "$SOURCE_COMMIT" \
+            --arg notes "$RELEASE_NOTES" \
             '{product: $product, type: $type, version: $version, channel: $channel,
+              notes: $notes,
               expected_sha256: $zip, expected_manifest_sha256: $manifest,
               source: {repository: $repository, run_id: $run_id, tag: $tag, commit: $commit}}')
           STATUS=$(curl -s -o receipt.json -w '%{http_code}' \
