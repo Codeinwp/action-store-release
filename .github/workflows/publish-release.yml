@@ -51,11 +51,17 @@ on:
         description: 'Uploaded artifact containing <product>.zip and <product>.json'
         required: true
         type: string
+      notes:
+        description: 'Customer-facing release notes (HTML), stored verbatim in the release record'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   publish:
     name: Publish ${{ inputs.product }} ${{ inputs.version }} (${{ inputs.channel }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       id-token: write
       contents: read
@@ -71,6 +77,7 @@ jobs:
       SOURCE_RUN_ID: ${{ github.run_id }}
       SOURCE_TAG: ${{ github.ref_name }}
       SOURCE_COMMIT: ${{ github.sha }}
+      RELEASE_NOTES: ${{ inputs.notes }}
     steps:
       - name: Validate inputs
         run: |
@@ -97,6 +104,21 @@ jobs:
           echo "zip_sha256=$(sha256sum "$ZIP" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
           echo "manifest_sha256=$(sha256sum "$MANIFEST" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
+      - name: Mint the publisher-audience OIDC token
+        id: oidc
+        run: |
+          set -euo pipefail
+          # A second identity token, consumed by the publisher itself: the
+          # AWS role only gates transport, while this token's signed
+          # repository claims decide which products this repo may publish.
+          RESPONSE=$(curl -sS --max-time 20 -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://releases.themeisle.com/publisher")
+          TOKEN=$(echo "$RESPONSE" | jq -r '.value // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Could not mint the publisher OIDC token"; exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
       - name: Assume the release-workflow role (OIDC)
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
@@ -114,6 +136,7 @@ jobs:
         env:
           ZIP_SHA256: ${{ steps.digests.outputs.zip_sha256 }}
           MANIFEST_SHA256: ${{ steps.digests.outputs.manifest_sha256 }}
+          GH_OIDC: ${{ steps.oidc.outputs.token }}
         run: |
           set -euo pipefail
           BODY=$(jq -n \
@@ -127,13 +150,16 @@ jobs:
             --arg run_id "$SOURCE_RUN_ID" \
             --arg tag "$SOURCE_TAG" \
             --arg commit "$SOURCE_COMMIT" \
+            --arg notes "$RELEASE_NOTES" \
             '{product: $product, type: $type, version: $version, channel: $channel,
+              notes: $notes,
               expected_sha256: $zip, expected_manifest_sha256: $manifest,
               source: {repository: $repository, run_id: $run_id, tag: $tag, commit: $commit}}')
           STATUS=$(curl -s -o receipt.json -w '%{http_code}' \
             --aws-sigv4 "aws:amz:us-east-1:lambda" \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            -H "x-github-oidc: ${GH_OIDC}" \
             -H 'Content-Type: application/json' \
             -X POST "${PUBLISHER_URL}/publish" -d "$BODY")
           cat receipt.json
@@ -142,6 +168,8 @@ jobs:
           fi
 
       - name: Promote channel
+        env:
+          GH_OIDC: ${{ steps.oidc.outputs.token }}
         run: |
           set -euo pipefail
           BODY=$(jq -n --arg product "$PRODUCT" --arg channel "$CHANNEL" --arg version "$VERSION" \
@@ -150,6 +178,7 @@ jobs:
             --aws-sigv4 "aws:amz:us-east-1:lambda" \
             --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
             -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            -H "x-github-oidc: ${GH_OIDC}" \
             -H 'Content-Type: application/json' \
             -X POST "${PUBLISHER_URL}/promote" -d "$BODY")
           cat promote.json
