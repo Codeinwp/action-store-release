@@ -1,0 +1,182 @@
+# Reusable release-publication workflow (Codeinwp/themeisle#2107, Phase 2).
+#
+# Callers build their zip + checksum manifest, upload them as one artifact,
+# then call this workflow PINNED BY FULL COMMIT SHA:
+#
+#   publish:
+#     needs: build
+#     permissions:
+#       id-token: write   # required: AWS OIDC
+#       contents: read
+#     uses: Codeinwp/action-store-release/.github/workflows/publish-release.yml@<sha>
+#     with:
+#       product: neve-pro-addon
+#       type: plugin
+#       version: ${{ needs.build.outputs.version }}
+#       artifact-name: release-files
+#
+# The workflow assumes the themeisle-release-workflow AWS role (allowed per
+# repo, tag refs only), stages intake/, calls the publisher (/publish,
+# /promote), and verifies the release through the public catalog API.
+# Store notification stays in the caller until the OIDC receiver ships.
+# Contract: themeisle-lambda-functions docs/release-catalog.md.
+#
+# Inputs and git-derived values reach shell ONLY through env vars (never
+# inline ${{ }} in run: blocks) — a hostile tag name must never execute on
+# a runner that holds AWS credentials.
+
+name: Publish release to the catalog
+
+on:
+  workflow_call:
+    inputs:
+      product:
+        description: 'Product slug (zip root folder / S3 folder name)'
+        required: true
+        type: string
+      type:
+        description: 'plugin or theme'
+        required: true
+        type: string
+      version:
+        description: 'Exact version being released'
+        required: true
+        type: string
+      channel:
+        description: 'Release channel'
+        required: false
+        type: string
+        default: 'stable'
+      artifact-name:
+        description: 'Uploaded artifact containing <product>.zip and <product>.json'
+        required: true
+        type: string
+
+jobs:
+  publish:
+    name: Publish ${{ inputs.product }} ${{ inputs.version }} (${{ inputs.channel }})
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PUBLISHER_URL: https://tu27njhoctaxhysbli63uqffuy0dzbfu.lambda-url.us-east-1.on.aws
+      RELEASES_BUCKET: themeisle-releases
+      CATALOG_URL: https://api.themeisle.com/catalog
+      PRODUCT: ${{ inputs.product }}
+      PRODUCT_TYPE: ${{ inputs.type }}
+      VERSION: ${{ inputs.version }}
+      CHANNEL: ${{ inputs.channel }}
+      SOURCE_REPOSITORY: ${{ github.repository }}
+      SOURCE_RUN_ID: ${{ github.run_id }}
+      SOURCE_TAG: ${{ github.ref_name }}
+      SOURCE_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Validate inputs
+        run: |
+          set -euo pipefail
+          [[ "$PRODUCT" =~ ^[a-z0-9][a-z0-9_-]{0,49}$ ]] || { echo "::error::Invalid product slug"; exit 1; }
+          [[ "$VERSION" =~ ^[A-Za-z0-9._-]{1,32}$ ]] || { echo "::error::Invalid version"; exit 1; }
+          [[ "$PRODUCT_TYPE" =~ ^(plugin|theme)$ ]] || { echo "::error::type must be plugin or theme"; exit 1; }
+          [[ "$CHANNEL" =~ ^(stable|beta)$ ]] || { echo "::error::channel must be stable or beta"; exit 1; }
+
+      - name: Download release artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: release
+
+      - name: Compute digests
+        id: digests
+        run: |
+          set -euo pipefail
+          ZIP="release/${PRODUCT}.zip"
+          MANIFEST="release/${PRODUCT}.json"
+          test -f "$ZIP" || { echo "::error::${ZIP} missing from artifact"; exit 1; }
+          test -f "$MANIFEST" || { echo "::error::${MANIFEST} missing from artifact"; exit 1; }
+          echo "zip_sha256=$(sha256sum "$ZIP" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "manifest_sha256=$(sha256sum "$MANIFEST" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Assume the release-workflow role (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: arn:aws:iam::185387363267:role/themeisle-release-workflow
+          aws-region: us-east-1
+
+      - name: Stage intake
+        run: |
+          set -euo pipefail
+          aws s3 cp "release/${PRODUCT}.zip" "s3://${RELEASES_BUCKET}/intake/${PRODUCT}/${VERSION}/${PRODUCT}.zip"
+          aws s3 cp "release/${PRODUCT}.json" "s3://${RELEASES_BUCKET}/intake/${PRODUCT}/${VERSION}/${PRODUCT}.json"
+
+      - name: Publish
+        id: publish
+        env:
+          ZIP_SHA256: ${{ steps.digests.outputs.zip_sha256 }}
+          MANIFEST_SHA256: ${{ steps.digests.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          BODY=$(jq -n \
+            --arg product "$PRODUCT" \
+            --arg type "$PRODUCT_TYPE" \
+            --arg version "$VERSION" \
+            --arg channel "$CHANNEL" \
+            --arg zip "$ZIP_SHA256" \
+            --arg manifest "$MANIFEST_SHA256" \
+            --arg repository "$SOURCE_REPOSITORY" \
+            --arg run_id "$SOURCE_RUN_ID" \
+            --arg tag "$SOURCE_TAG" \
+            --arg commit "$SOURCE_COMMIT" \
+            '{product: $product, type: $type, version: $version, channel: $channel,
+              expected_sha256: $zip, expected_manifest_sha256: $manifest,
+              source: {repository: $repository, run_id: $run_id, tag: $tag, commit: $commit}}')
+          STATUS=$(curl -s -o receipt.json -w '%{http_code}' \
+            --aws-sigv4 "aws:amz:us-east-1:lambda" \
+            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+            -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -X POST "${PUBLISHER_URL}/publish" -d "$BODY")
+          cat receipt.json
+          if [ "$STATUS" != "201" ] && [ "$STATUS" != "200" ]; then
+            echo "::error::Publish rejected (HTTP $STATUS)"; exit 1
+          fi
+
+      - name: Promote channel
+        run: |
+          set -euo pipefail
+          BODY=$(jq -n --arg product "$PRODUCT" --arg channel "$CHANNEL" --arg version "$VERSION" \
+            '{product: $product, channel: $channel, version: $version}')
+          STATUS=$(curl -s -o promote.json -w '%{http_code}' \
+            --aws-sigv4 "aws:amz:us-east-1:lambda" \
+            --user "${AWS_ACCESS_KEY_ID}:${AWS_SECRET_ACCESS_KEY}" \
+            -H "x-amz-security-token: ${AWS_SESSION_TOKEN}" \
+            -H 'Content-Type: application/json' \
+            -X POST "${PUBLISHER_URL}/promote" -d "$BODY")
+          cat promote.json
+          if [ "$STATUS" != "200" ]; then
+            echo "::error::Promote rejected (HTTP $STATUS)"; exit 1
+          fi
+
+      - name: Verify through the public catalog
+        env:
+          ZIP_SHA256: ${{ steps.digests.outputs.zip_sha256 }}
+        run: |
+          set -euo pipefail
+          # The publisher already confirmed; this proves the customer-facing
+          # read path serves the promoted release with the right digest.
+          # Transient fetch/parse failures count as a failed attempt, not a
+          # failed job: the release is already live at this point.
+          for i in 1 2 3 4 5; do
+            RESPONSE=$(curl -s --max-time 20 "${CATALOG_URL}/${PRODUCT}/${CHANNEL}" || echo '')
+            FOUND=$(echo "$RESPONSE" | jq -r '.found // false' 2>/dev/null || echo 'false')
+            POINTER_VERSION=$(echo "$RESPONSE" | jq -r '.pointer.version // empty' 2>/dev/null || echo '')
+            SHA=$(echo "$RESPONSE" | jq -r '.record.artifact.sha256 // empty' 2>/dev/null || echo '')
+            if [ "$FOUND" = "true" ] && [ "$POINTER_VERSION" = "$VERSION" ] && [ "$SHA" = "$ZIP_SHA256" ]; then
+              echo "Catalog serves ${PRODUCT}@${POINTER_VERSION} sha256=${SHA}"
+              exit 0
+            fi
+            echo "Catalog not caught up yet (attempt $i)"
+            sleep 15
+          done
+          echo "::error::Catalog read-back did not confirm the promoted release"
+          exit 1
